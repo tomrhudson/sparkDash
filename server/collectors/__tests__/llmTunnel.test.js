@@ -4,9 +4,11 @@ import net from "net";
 import os from "os";
 import path from "path";
 import fs from "fs";
+import { EventEmitter } from "events";
 import {
   allocateLocalPort,
   onceClose,
+  openSshLlmTunnel,
   probeLlmHttp,
   resolveLlmHttpTarget,
   waitForTcp,
@@ -149,6 +151,34 @@ test("resolveLlmHttpTarget: combines LAN + tunnel errors", async () => {
       ),
     /192\.168\.1\.212:8888[\s\S]*SSH config missing/
   );
+});
+
+test("openSshLlmTunnel configures stderr with a valid text encoding", async () => {
+  const child = new EventEmitter();
+  child.killed = false;
+  child.kill = () => {
+    child.killed = true;
+  };
+  child.stderr = {
+    setEncoding(value) {
+      assert.equal(value, "utf8");
+    },
+    on() {},
+  };
+
+  const promise = openSshLlmTunnel(
+    { ssh: { host: "127.0.0.1", user: "mia", auth: "key" } },
+    8888,
+    {
+      allocatePort: async () => 9,
+      spawnImpl: () => {
+        process.nextTick(() => child.emit("error", new Error("expected test failure")));
+        return child;
+      },
+    }
+  );
+
+  await assert.rejects(promise, /expected test failure/);
 });
 
 test("DecodeBench closes resolveTarget when the LLM is down", async () => {
